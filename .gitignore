@@ -1,0 +1,37 @@
+# --- ambiente e caches -----------------------------------------------------
+.venv/
+__pycache__/
+*.pyc
+
+# --- modelos baixados (centenas de MB; baixam sozinhos na primeira vez) -----
+models/
+
+# --- configuracao pessoal ---------------------------------------------------
+# O config.toml real tem a senha falada do guarda, caminhos desta maquina e
+# nomes de projetos de clientes. O que vai para o repositorio e o
+# config.example.toml; copie para config.toml e ajuste.
+config.toml
+
+# --- o que voce falou e o que ela fez --------------------------------------
+# Conversas, transcricoes, latencias e o log de acoes autorizadas. Sao dados
+# seus, nao codigo.
+logs/
+Conversas de Voz/
+transcript.log
+metrics.csv
+.cache_conversas.json
+
+# --- estado de sessao -------------------------------------------------------
+.session_id
+.session_*
+
+# --- rascunhos e lixo -------------------------------------------------------
+tmp/
+*.bak
+*.wav
+
+# --- documentos pessoais -------------------------------------------------------
+docs/bot-de-jogo.md
+
+# copia do mcp.json com as variaveis ja expandidas, gerada pela ponte
+.mcp.resolvido.json

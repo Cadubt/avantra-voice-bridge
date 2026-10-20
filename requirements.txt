@@ -1,0 +1,12 @@
+numpy
+sounddevice
+faster-whisper
+onnxruntime
+piper-tts
+edge-tts
+mss
+pillow
+# Transcricao na GPU: sem estes, o faster-whisper carrega o modelo na placa e
+# estoura na primeira fala com "cublas64_12.dll is not found".
+nvidia-cublas-cu12
+nvidia-cudnn-cu12

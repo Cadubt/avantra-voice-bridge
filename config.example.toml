@@ -1,0 +1,497 @@
+# avantra-voice-bridge — configuracao de EXEMPLO
+#
+# Copie para config.toml e ajuste. O config.toml real fica fora do git
+# (.gitignore): ele guarda a senha falada do guarda, caminhos da sua
+# maquina e nomes dos seus projetos.
+#
+#   copy config.example.toml config.toml
+#
+# Os caminhos abaixo sao os da maquina onde a ponte nasceu. Troque
+# SEU_USUARIO e as pastas de projeto pelas suas.
+# Tudo que vale ajustar esta aqui. Edite e reinicie.
+
+[audio]
+# Trecho do nome do dispositivo de entrada. Vazio = padrao do Windows.
+# Rode `start.cmd --list-devices` para ver os nomes.
+input_device = "QuadCast"
+samplerate = 16000
+block_ms = 32
+# Multiplica o sinal de entrada. 1.0 = nao mexe.
+# Use so se o microfone estiver baixo e voce nao puder subir o ganho nele:
+# aqui o ruido de fundo sobe junto com a voz.
+# Diagnostique com: .venv\Scripts\python.exe tools\diagnostico_mic.py
+gain = 1.0
+
+[vad]
+# "silero" = modelo neural, aguenta ruido de fundo.
+# "energy" = so volume RMS, zero dependencia. Cai pra ca se o silero falhar.
+backend = "silero"
+# Probabilidade de fala (silero, 0..1). Sobe se disparar sozinho com barulho.
+threshold = 0.6
+# Limiar de volume do backend "energy" (0..1).
+energy_threshold = 0.015
+# Quanto de fala continua para considerar que voce comecou a falar.
+start_ms = 160
+# Quanto de silencio para considerar que voce terminou. Esse e o botao de
+# "ele me corta no meio da frase" (sobe) vs "demora pra responder" (desce).
+silence_ms = 750
+# Corta a fala a forca depois disso.
+max_utterance_s = 45
+# Descarta falas curtas demais (tosse, clique, batida na mesa).
+min_utterance_ms = 450
+# Audio guardado ANTES do VAD disparar, pra nao perder a primeira silaba.
+pre_roll_ms = 320
+
+[stt]
+# tiny | base | small | medium | large-v3
+# Medido nesta maquina (4 falas sinteticas, mediana por fala):
+#   small  cpu   1620 ms   WER  9%
+#   medium cpu   4840 ms   WER 12%  <- pior E mais lento, nao use
+#   small  cuda   194 ms   WER 12%
+#   medium cuda   416 ms   WER  9%  <- o escolhido
+#   large-v3 cuda 528 ms   WER 10%  (86 s para carregar, nao compensa)
+# Se precisar da VRAM para outra coisa, caia para small/cuda ou small/cpu.
+model = "large-v3"
+# "cpu" ou "cuda". A GPU e 4x a 12x mais rapida; veja a tabela acima.
+device = "cuda"
+# cpu -> int8 | cuda -> float16 ou int8_float16
+compute_type = "float16"
+language = "pt"
+beam_size = 1
+cpu_threads = 6
+# Filtros anti-lixo: o que nao passar daqui e descartado em silencio.
+# Vocabulario do seu mundo, entregue ao Whisper antes de cada transcricao.
+#
+# Nome proprio que o modelo nao conhece vira a palavra comum mais parecida:
+# "TavernTale" virava "Taverneiro", "Avantra" virava "Avante". Listar os
+# termos aqui muda a probabilidade deles e resolve — foi assim que a palavra
+# de ativacao passou de 1 acerto em 5 para 5 em 5.
+#
+# Escreva como uma frase natural, nao como lista solta: o modelo trata isto
+# como contexto anterior, entao prosa funciona melhor. Mantenha curto (umas
+# 30 palavras); prompt longo demais atrapalha em vez de ajudar.
+vocabulario = """
+Conversa sobre o TavernTale, jogo em Unity e Blender inspirado em Tibia, da
+Cadubt Entertainment. Falamos de cenas, sprites, hunts, shaders, e Avantra.
+"""
+min_chars = 3
+max_no_speech_prob = 0.6
+min_avg_logprob = -1.1
+
+[brain]
+# "persistent" = um unico processo claude vivo recebendo as falas por stdin.
+#                Sem boot por frase, contexto nativo. Recomendado.
+# "oneshot"    = um `claude -p --resume <id>` por frase. Mais lento, mais robusto.
+mode = "persistent"
+# Medido nesta maquina, tempo ate a PRIMEIRA FRASE sair falada (mediana de 3):
+#   haiku  chat   2373 ms   <- o escolhido
+#   haiku  full   2455 ms
+#   sonnet full   3354 ms
+#   sonnet chat   4987 ms
+# O haiku e quase o dobro mais rapido e da conta de conversa. Para uma
+# pergunta que exige raciocinio, peca "modo esperto" por voz e ele troca.
+model = "haiku"
+
+# Pasta onde o claude vai rodar — define quais arquivos ele enxerga, qual
+# CLAUDE.md carrega e quais servidores MCP sobem (inclusive o do Blender).
+cwd = "X:\\Cadu Benevolent Technologies\\Cadubt Entertainment\\Tavern Tale"
+
+# "chat" = so conversa, sem tocar em arquivo nenhum.
+# "full" = Claude Code completo: le, escreve e roda comandos na pasta acima.
+#          Quando ele resolve investigar os arquivos, uma resposta pode levar
+#          50 s (medido). Comece em "chat" e peca "liga as ferramentas" por voz.
+tools = "full"
+
+# Pastas que o Avantra pode ler alem da pasta de trabalho.
+# A de projects e onde o Claude Code grava TODAS as conversas, do app e do
+# terminal, em <pasta-do-projeto>/<id>.jsonl. Com ela liberada voce pode
+# pedir "retoma a conversa do Tavern Tale" e ele le o historico de verdade.
+# Use tools/conversas.py para listar, buscar e ler.
+#
+# ATENCAO: permissao total (bypassPermissions) NAO da acesso a qualquer pasta.
+# Ela tira o pedido de confirmacao; as ferramentas de arquivo continuam
+# confinadas ao que estiver declarado aqui mais a pasta de trabalho. Se o
+# Avantra disser que "so pode mexer dentro do projeto", e porque a pasta nao
+# esta nesta lista.
+extra_dirs = [
+  '~/.claude/projects',    # historico de todas as conversas
+  'C:\Users\SEU_USUARIO',        # Desktop, Documentos, Downloads, configuracoes
+  'X:\',                   # todos os projetos, jogos e programas do disco X
+]
+# Permissao total. So e aceitavel porque [guarda] esta ligado e intercepta o
+# que for perigoso antes de executar, repetindo a acao em voz alta para voce
+# autorizar. Se desligar o guarda, volte para "acceptEdits".
+permission_mode = "bypassPermissions"
+
+# Continuidade entre execucoes:
+#   ""        -> comeca uma conversa nova e guarda o id em .session_id,
+#                retomando sozinho na proxima vez que voce ligar a ponte.
+#   "<uuid>"  -> retoma UMA conversa especifica. Pode ser uma sessao do app
+#                desktop: pegue o id em ~/.claude/projects/<pasta>/<id>.jsonl.
+#   "none"    -> conversa nova toda vez, sem memoria entre execucoes.
+resume_session_id = ""
+# Retoma uma copia em vez da sessao original. Deixe true se o id acima for de
+# uma conversa que voce ainda usa no app desktop — evita os dois escreverem nela.
+fork_session = true
+
+# Corta respostas quilometricas antes de mandar pro TTS.
+max_reply_chars = 1400
+timeout_s = 300
+system_prompt = """
+Voce esta sendo ouvido em voz alta, nao lido. Responda em portugues do Brasil.
+Seja curto: uma a tres frases, a nao ser que peçam detalhe.
+Nada de markdown, listas, emoji, blocos de codigo ou URLs — nada disso soa bem falado.
+Escreva numeros e siglas como se fala.
+Ao usar ferramentas, nao narre o que esta fazendo; diga so o resultado.
+O texto que voce recebe vem de transcricao automatica e pode ter erros; se uma
+palavra nao fizer sentido no contexto, assuma o sentido mais provavel em vez de
+perguntar, e so peça pra repetir se a frase inteira estiver incompreensivel.
+
+Voce se chama Avantra.
+
+Voce tem acesso a maquina inteira do Cadu, nao so a pasta do projeto: o disco
+X inteiro e a pasta de usuario dele, incluindo Desktop, Documentos e Downloads.
+Se ele pedir algo fora da pasta de trabalho atual — criar uma pasta no Desktop,
+abrir um arquivo em Downloads — faça, nao responda que so pode mexer no projeto.
+Existe um guarda entre voce e a maquina: cada ferramenta passa por ele antes
+de rodar. Coisa de rotina passa direto; coisa destrutiva (apagar, formatar,
+mover, matar processo, desinstalar, mexer no registro) e lida em voz alta para
+o Cadu, que autoriza ou nao falando. Entao nao se autocensure: proponha e
+execute, que ele decide na hora.
+
+A ponte intercepta alguns pedidos antes de chegarem em voce, e os resolve
+sozinha: trocar de modelo ("usa o Opus"), mudar o esforco ("esforco maximo"),
+abrir programa, trocar de pasta e encerrar a conversa. Se o Cadu pedir algo
+assim e chegar ate voce, e porque ele falou de um jeito que a ponte nao
+reconheceu — diga a frase exata que funciona, em vez de responder que voce
+nao consegue trocar de modelo. Voce consegue, pela ponte.
+
+Se uma ferramenta sua for bloqueada, a causa e o guarda, NAO as permissoes do
+Claude Code. Nao mande o Cadu editar settings.json nem criar regras de
+permissao: isso nao tem efeito nenhum aqui. Diga o que voce ia fazer e que ele
+nao autorizou, e pergunte se ele quer autorizar. Quem ajusta o que passa sem
+perguntar e o arquivo config.toml da ponte, secao guarda, pastas livres.
+
+Voce enxerga a tela do Cadu e usa o mouse e o teclado dele, pelas ferramentas
+do servidor tela. Como funciona:
+
+  - comece sempre por ver_tela. As coordenadas de clicar, arrastar e rolar
+    sao as da IMAGEM que ela devolve, nao as do monitor.
+  - voce so mexe em programa que ele liberou. Chame liberar_aplicativo com o
+    nome que ele falou e diga no motivo o que vai fazer ali: a ponte le isso
+    em voz alta e ele autoriza falando.
+  - programa nao liberado aparece coberto na imagem. E de proposito, nao e
+    defeito; se precisar ver, peca a liberacao.
+  - digitar vai para a janela que esta na frente. Se nao for a certa, clique
+    nela antes.
+  - depois de clicar ou digitar, tire outra foto da tela e confira. Nao diga
+    que fez se voce nao viu acontecer.
+  - ver_perto amplia um pedaco, para ler texto pequeno sem chutar.
+
+A ponte tambem entra nas sessoes do aplicativo Claude, as que o Cadu ve na
+barra lateral: ele diz "muda para a sessao tal" e voce passa a continuar
+aquela conversa, com o historico dela. Quando isso acontece, o que voces
+falarem e o que voce fizer ficam gravados no chat de texto daquela sessao, e
+ele vai ler por la depois — entao nao repita o que ja esta escrito, e deixe
+claro o que voce fez. Quem resolve a troca e a ponte, nao voce: se ele pedir
+de um jeito que chegue ate voce, diga a frase que funciona.
+
+Voce tem acesso ao historico de TODAS as conversas do Cadu com o Claude Code,
+do aplicativo e do terminal, gravadas em ~/.claude/projects. Quando ele pedir
+para voce olhar, retomar ou continuar alguma conversa anterior, use:
+
+  X:\\Dev\\avantra-voice-bridge\\.venv\\Scripts\\python.exe X:\\Dev\\avantra-voice-bridge\\tools\\conversas.py buscar <termos>
+  ...mesma coisa... conversas.py ler <id> --ultimas 40
+
+O 'buscar' lista as conversas que casam, com id, titulo, data e pasta. O 'ler'
+imprime as falas. Sao conversas longas: leia as ultimas falas primeiro e so
+puxe mais se precisar. Depois de ler, diga em voz alta um resumo curto de onde
+aquilo parou e pergunte o que ele quer fazer — nao despeje o historico inteiro.
+"""
+
+[tts]
+# "edge"  = vozes neurais da Microsoft. Melhor sotaque e qualidade, mas e
+#           ONLINE: o texto da resposta vai para a Microsoft, e sem internet
+#           nao fala. Custa ~0,9 s a mais por turno que o Piper.
+# "piper" = voz neural offline, roda na sua maquina. ~150 ms, sem internet.
+# "sapi"  = Microsoft Maria Desktop (robotica, ultimo recurso).
+# "none"  = so imprime na tela, nao fala.
+backend = "edge"
+
+# --- edge ---
+# Vozes pt-BR disponiveis: pt-BR-AntonioNeural (masculina),
+# pt-BR-FranciscaNeural, pt-BR-ThalitaMultilingualNeural (femininas).
+edge_voice = "pt-BR-FranciscaNeural"
+# Para onde cair quando a internet falhar. O Edge so quebra na hora de
+# sintetizar, nao ao subir, entao sem isto a ponte emudeceria no meio da
+# conversa sem dizer por que.
+#   "piper" -> voz MASCULINA local, boa qualidade (a unica pt-BR do Piper)
+#   "sapi"  -> Microsoft Maria Desktop, feminina mas robotica
+#   "none"  -> sem reserva: fica mudo se cair
+edge_reserva = "piper"
+# Tom em Hz. Negativo = mais grave.
+edge_pitch = "+0Hz"
+edge_rate = "+0%"
+edge_volume = "+0%"
+
+# --- piper (fallback offline) ---
+piper_voice = "pt_BR-cadu-medium"
+# Tom, em semitons. Negativo = mais grave. -2 e sutil, -4 ja e bem grave.
+# Rode tools/comparar_vozes.py para ouvir as opcoes lado a lado.
+piper_pitch = 0.0
+# Velocidade da fala. 1.0 = normal, 1.1 = um pouco mais rapido.
+piper_speed = 1.0
+piper_volume = 1.0
+sapi_voice = "Microsoft Maria Desktop"
+sapi_rate = 1
+# Comeca a falar na primeira frase pronta, sem esperar a resposta inteira.
+# E o maior ganho de latencia percebida que existe aqui.
+stream_sentences = true
+
+# Toca um bipe curto toda vez que ela TERMINA de falar, para voce saber que
+# ela parou e ja esta ouvindo. Sem isso voce adivinha pelo silencio e acaba
+# falando por cima do fim da frase — e a sua fala e descartada.
+bip_ao_terminar = true
+
+# --- interromper ele falando ---
+# A forma confiavel de interromper e a tecla Pause: ela para a fala E o turno
+# na hora, sem depender de transcricao, entao funciona com caixa de som, com
+# barulho, e no meio de uma palavra.
+#
+# Abaixo, a alternativa por voz: dizer "Avantra" enquanto ele fala. Ela exige
+# manter o MICROFONE ABERTO durante a fala dele — e com caixa de som isso
+# significa captar a propria voz dele e ter que filtrar o eco, que nunca e
+# perfeito. Com o Pause resolvendo o mesmo problema, o padrao aqui e false:
+# microfone mudo enquanto ele fala, zero eco, zero falso positivo.
+#
+# Ligue se voce usar FONE DE OUVIDO: ai nao ha eco nenhum e interromper
+# falando e mais comodo.
+interromper_pelo_nome = false
+
+# ATENCAO, isto vale para quem usa CAIXA DE SOM (e o caso do Cadu): o
+# microfone capta a voz dele, entao a ponte precisa separar "o Cadu falou" de
+# "isso e o alto-falante". Tres defesas, nesta ordem:
+#
+# 1. Duracao: chamar alguem e curto. Fala capturada mais longa que isto
+#    durante a reproducao e ignorada sem nem transcrever (economiza GPU).
+interrupcao_max_s = 4.0
+# 2. Comparacao com o que ele falou nos ultimos N segundos. Precisa cobrir a
+#    pausa entre frases: o VAD so fecha a fala depois do silencio, entao a
+#    transcricao do eco chega quando a frase ja acabou de tocar.
+eco_janela_s = 12.0
+# 3. Quanto das palavras precisa coincidir para considerar eco. Se ele comecar
+#    a se interromper sozinho, baixe para 0.5. Se o eco estiver passando e
+#    virando pergunta, suba para 0.7.
+eco_limiar = 0.6
+#
+# Com FONE DE OUVIDO nada disso e necessario: nenhuma dessas defesas atrapalha,
+# mas voce pode relaxar interrupcao_max_s se quiser interromper com frases
+# mais longas.
+
+[workspaces]
+# Pastas que voce pode alternar por voz: "Avantra, trabalhar no <nome>".
+# Cada uma guarda a propria conversa, entao voce volta de onde parou.
+# O nome e o que voce fala; o valor e a pasta.
+tavern = 'X:\Cadu Benevolent Technologies\Cadubt Entertainment\Tavern Tale'
+cenas = 'X:\Cadu Benevolent Technologies\Cadubt Entertainment\Tavern Tale\Blender Models\Scenes'
+jogo = 'X:\Cadu Benevolent Technologies\Cadubt Entertainment\Tavern Tale\TavernTale'
+ponte = 'X:\Dev\avantra-voice-bridge'
+
+[modelos]
+# Modelos trocaveis por voz: "Avantra, usa o Opus", "muda pro haiku".
+# A esquerda o que voce FALA, a direita o que o claude recebe em --model.
+# Trocar reinicia o processo (uns 8 segundos) e retoma a mesma conversa, entao
+# o contexto nao se perde — mas numa conversa longa o historico e reenviado,
+# e isso custa. Troque quando for mudar de tipo de tarefa, nao a toda hora.
+haiku = "haiku"
+sonnet = "sonnet"
+opus = "opus"
+fable = "fable"
+# Alguns jeitos de falar a mesma coisa:
+"opus cinco" = "opus"
+"opus 5" = "opus"
+rapido = "haiku"
+esperto = "sonnet"
+potente = "opus"
+
+[esforcos]
+# Quanto o modelo pensa antes de responder: "Avantra, esforço máximo".
+# Mais esforco = resposta melhor e MAIS LENTA. No "max" uma resposta pode
+# levar bem mais que os ~2 segundos do haiku em esforco normal.
+baixo = "low"
+normal = "medium"
+medio = "medium"
+alto = "high"
+altissimo = "xhigh"
+maximo = "max"
+max = "max"
+
+[apps]
+# Programas que voce pode abrir por voz: "Avantra, abre o World of Warcraft".
+# A ponte resolve o nome AQUI e executa direto — nao passa pelo modelo. Entao
+# uma transcricao errada nao consegue rodar nada que nao esteja nesta lista.
+# Para adicionar, ponha o nome que voce fala e o caminho do executavel.
+"world of warcraft" = 'X:\Games\World of Warcraft\World of Warcraft Launcher.exe'
+"battle net" = 'X:\Games\Battle.net\Battle.net Launcher.exe'
+steam = 'C:\Program Files (x86)\Steam\steam.exe'
+blender = 'C:\Program Files\Blender Foundation\Blender 4.1\blender.exe'
+explorador = 'explorer.exe'
+
+[wake]
+# Palavra de ativacao. Com a escuta desarmada, a ponte transcreve o que ouve
+# num modelo pequeno e so acorda quando o nome aparece. O resto da frase na
+# mesma fala ja vale como primeiro pedido: "Avantra, abre a cena da taverna".
+enabled = true
+
+# O NOME e como ele se apresenta e como voce fala dele.
+nome = "Avantra"
+
+# O GATILHO e a palavra que o acorda — e nao precisa ser o nome.
+#
+# Por que sao separados: "Aesir" nao existe no vocabulario do Whisper, entao
+# ele chuta a palavra portuguesa mais parecida, e chuta diferente conforme a
+# entonacao. Medido nesta maquina, com a voz do Cadu, o mesmo "Aesir" virou:
+# Aizir, Aisir, Azevedo, Azeite, Aze, "A Izir" e "Eu sei". Nao da para cobrir
+# isso com uma lista: "eu sei" e das frases mais comuns do portugues, e
+# afrouxar a comparacao por semelhanca faria meio dicionario virar ativacao.
+#
+# O gatilho tem que ser uma palavra que o Whisper JA conhece e que voce nao
+# diz por acaso. Com o vies do initial_prompt (veja bridge/stt.py) qualquer
+# palavra conhecida serve: Odin, Avantra e Jarvis deram 5 de 5 no teste.
+gatilho = "Avantra"
+# Varias grafias porque a transcricao erra nome proprio. Minusculo, sem acento.
+# As quatro primeiras sao as que o Whisper REALMENTE produziu com a voz do
+# Cadu neste microfone (medido): "aizir" em 3 de 4 tentativas, "aisir" na
+# outra. As demais sao palpites de seguranca.
+# Nao coloque "azeite" aqui: o Whisper ja escreveu isso uma vez, mas e palavra
+# comum e faria a ponte acordar no meio de uma conversa qualquer.
+# Grafias aceitas do GATILHO. Palavra conhecida erra pouco, entao a lista e
+# curta — so as variantes plausiveis de "Avantra". As duas primeiras vieram
+# do que o Whisper escreveu com a voz do Cadu antes do viés: "A vantra" e
+# "Aventra". Nao inclua "avante": e palavra do portugues.
+# Rode tools/calibrar_wake.py se alguma pronuncia sua nao estiver pegando.
+phrases = ["avantra", "a vantra", "aventra", "avantara", "avantrá", "avanttra"]
+
+# Folga da comparacao por semelhanca, usada quando nenhuma grafia acima casa.
+# Com um gatilho curto, uma letra de folga e folga demais: a 0.35, "o dia"
+# (que vira "odia") acordava, e a 0.2 "o Dino" ainda passava. Como "Odin" e
+# palavra conhecida e o Whisper erra pouco, a lista acima basta sozinha, e
+# isto fica apertado o suficiente para a rede de semelhanca nao atrapalhar.
+tolerancia = 0.15
+# Modelo usado so para ouvir o nome enquanto a escuta esta desarmada.
+#   ""      -> reaproveita o modelo principal (recomendado). Um modelo a
+#              menos na VRAM; com dois carregados a GPU estourou aqui com
+#              "MemoryError: bad allocation".
+#   "tiny"  -> carrega um segundo modelo, menor. So compensa se o principal
+#              estiver na CPU, onde o medium custa quase 5 s por fala.
+model = ""
+# Onde esse segundo modelo roda, quando houver. "cpu" nao disputa VRAM.
+device = "cpu"
+# Volta a dormir depois desse tempo sem voce falar nada. 0 = nunca dorme.
+sleep_after_s = 180
+# Som curto ao acordar, para voce saber que ele ouviu. "" = nao fala nada.
+# Vazio = so o bipe ao acordar, sem fala. Com texto, ela fala — mas enquanto
+# fala o microfone fica mudo, e a pergunta que voce emenda logo depois se
+# perde. O bipe evita essa janela morta.
+ack = ""
+
+[hotkeys]
+# Comeca escutando assim que a ponte sobe?
+# false e menos confuso: a ponte sobe calada e o Pause LIGA a escuta, que e o
+# que a tecla sugere. Com true, o seu primeiro Pause desliga em vez de ligar.
+armed_on_start = false
+# Liga/desliga a escuta continua.
+toggle = "pause"
+# Escuta uma fala so e desarma sozinho.
+oneshot = "ctrl+alt+v"
+# Cala a boca dele agora e descarta o turno.
+cancel = "ctrl+alt+x"
+
+[guarda]
+# Permissao total COM confirmacao falada.
+#
+# Com permission_mode = "bypassPermissions" o Claude executa sem perguntar
+# nada. Como o que chega ate ele e a TRANSCRICAO da sua voz, e transcricao
+# erra, a ponte registra um hook que intercepta cada ferramenta ANTES dela
+# rodar. Rotina passa direto; coisa perigosa e repetida em voz alta e espera
+# voce dizer sim ou nao.
+#
+# O que pede confirmacao esta em bridge/guarda.py (SHELL_PERIGOSO): apagar,
+# formatar, matar processo, mexer no registro, descartar trabalho no git,
+# mover ou renomear, desinstalar, baixar e executar script, mexer no firewall,
+# e qualquer escrita fora das suas pastas de projeto.
+#
+# false = sem rede de seguranca nenhuma. Nao recomendo com microfone aberto.
+enabled = true
+# Senha falada: depois do sim, a ponte pede a senha e so libera se ela aparecer
+# na resposta. Vazio = so o sim. Fica em texto puro neste arquivo.
+senha_confirmacao = ""   # defina a sua; vazio = sem senha
+# Quanto tempo esperar o seu sim ou nao antes de desistir (e recusar).
+# Quanto esperar a sua resposta depois de perguntar.
+#
+# espera_minima_s e um PISO, nao um teto: passado esse tempo ela so desiste se
+# voce nao estiver falando. O VAD so entrega a fala depois de 750 ms de
+# silencio, entao um prazo seco estourava no meio da sua frase e ela dizia
+# "nao ouvi resposta" — falando justamente por cima de voce.
+espera_s = 25
+espera_minima_s = 10
+# Teto duro, para nao travar para sempre se o microfone cair.
+espera_maxima_s = 180
+# Pedir confirmacao para alterar os arquivos da PROPRIA ponte (config.toml,
+# os .py, os .cmd). Mexer aqui e mexer na senha falada e no guarda, mas pedir
+# a cada ajuste de rotina atrapalhava mais do que protegia. true = volta a
+# pedir.
+proteger_a_ponte = false
+# Quantas vezes repetir a pergunta se nao entender a resposta.
+tentativas = 2
+
+# Plugins desligados SO para a ponte (nao mexe no Claude Code do app).
+# Plugin com hook proprio roda a cada turno; numa maquina de 14 GB com o
+# modelo de transcricao carregado, o gk-alpha do GitKraken falhava com
+# "cannot allocate memory" e o erro entrava na resposta falada.
+desligar_plugins = ["gitkraken-hooks@gitkraken"]
+
+# Confirmar antes de controlar a tela (mouse, teclado, liberar aplicativo)?
+#
+# false, a pedido do Cadu em 19/10/2026: ele quis o mesmo comportamento que
+# tem no aplicativo Claude — pede e acontece, sem confirmar a cada vez.
+#
+# O que isso significa na pratica: pedir para ela mexer num programa nao pede
+# mais autorizacao, e atalhos de sistema (Win+R, Alt+F4, Ctrl+Shift+Esc)
+# tambem passam direto. Olhar a tela nunca perguntou. O guarda continua
+# cobrindo tudo o mais: apagar arquivo, formatar, git destrutivo, Blender.
+confirmar_tela = false
+
+# Onde escrever arquivo NAO precisa de confirmacao: as pastas em que voce
+# espera que ele trabalhe sozinho. Escrita em qualquer outro lugar e
+# anunciada em voz alta antes.
+#
+# Isto e deliberadamente MENOR que [brain].extra_dirs. O extra_dirs diz onde
+# ele PODE chegar; esta lista diz onde ele pode agir sem te perguntar. Se as
+# duas fossem iguais, liberar o computador inteiro desligaria o guarda junto.
+pastas_livres = [
+  'X:\',                      # todo o disco de projetos, jogos e programas
+  'C:\',                      # todo o disco C (pastas do sistema seguem bloqueadas em guarda.py)
+  'C:\Users\SEU_USUARIO\Desktop',
+  'C:\Users\SEU_USUARIO\Downloads',
+  'C:\Users\SEU_USUARIO\Documents',
+]
+# O que continua pedindo confirmacao mesmo dentro das pastas acima:
+# apagar, formatar, mover ou renomear, matar processo, desinstalar, mexer no
+# registro ou no firewall, descartar trabalho no git, e baixar e executar
+# script da internet. Criar e editar arquivo ali passa direto; destruir, nao.
+# A lista completa esta em SHELL_PERIGOSO, em bridge/guarda.py.
+
+[log]
+# Um arquivo por dia dentro desta pasta:
+#   logs/conversa-2026-10-16.log   o que foi dito, em texto
+#   logs/latencia-2026-10-16.csv   o tempo de cada etapa de cada turno
+#   logs/acoes-2026-10-16.log      o que o guarda perguntou e o que voce respondeu
+pasta = "logs"
+
+# Alem dos logs acima, grava um resumo legivel DENTRO da pasta de trabalho,
+# nesta subpasta. Serve para voce (e para o Claude do aplicativo) reencontrar
+# o que foi falado por voz: conversa criada pela linha de comando NAO aparece
+# na barra lateral do app, so as que nascem nele. "" desliga.
+resumo_no_projeto = "Conversas de Voz"
+verbose = true

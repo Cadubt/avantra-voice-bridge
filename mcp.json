@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "blender": {
+      "command": "%LOCALAPPDATA%\\Claude-Data\\claude_pzs8sxrjxfjjc\\Claude Extensions\\ant.dir.gh.blender.blender-mcp\\.venv\\Scripts\\blender-mcp.exe",
+      "args": []
+    },
+    "tela": {
+      "command": "%PONTE_DIR%\\.venv\\Scripts\\python.exe",
+      "args": ["%PONTE_DIR%\\mcp_tela.py"]
+    }
+  }
+}
