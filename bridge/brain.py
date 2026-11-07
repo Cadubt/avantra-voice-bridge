@@ -414,16 +414,17 @@ class PersistentBrain:
     # ---------------- pergunta ----------------
 
     def ask(self, texto: str, on_sentence=None, cancel=None,
-            on_tool=None) -> Resposta:
+            on_tool=None, on_delta=None) -> Resposta:
         """Manda uma fala e espera a resposta.
 
         on_sentence(frase) e chamado assim que cada frase fica pronta, antes
-        de a resposta terminar. cancel e um threading.Event.
+        de a resposta terminar. cancel e um threading.Event. on_delta(texto)
+        recebe o texto ACUMULADO a cada pedaco: e o que o painel desenha.
         """
         with self._lock:
-            return self._ask(texto, on_sentence, cancel, on_tool)
+            return self._ask(texto, on_sentence, cancel, on_tool, on_delta)
 
-    def _ask(self, texto, on_sentence, cancel, on_tool) -> Resposta:
+    def _ask(self, texto, on_sentence, cancel, on_tool, on_delta=None) -> Resposta:
         if not self.vivo:
             return Resposta(erro="o processo claude morreu")
 
@@ -477,6 +478,8 @@ class PersistentBrain:
                             if not r.ms_primeiro_texto:
                                 r.ms_primeiro_texto = (time.perf_counter() - t0) * 1000
                             acumulado += pedaco
+                            if on_delta:
+                                on_delta(acumulado)
                             if on_sentence:
                                 for f in frases.alimentar(pedaco):
                                     on_sentence(f)
@@ -513,6 +516,8 @@ class PersistentBrain:
                         for f in frases.alimentar(extra):
                             on_sentence(f)
                     acumulado = final
+                    if on_delta:
+                        on_delta(acumulado)
                 r.texto = acumulado.strip()
                 break
 
@@ -552,7 +557,8 @@ class OneshotBrain:
     def vivo(self) -> bool:
         return True
 
-    def ask(self, texto: str, on_sentence=None, cancel=None, on_tool=None) -> Resposta:
+    def ask(self, texto: str, on_sentence=None, cancel=None, on_tool=None,
+            on_delta=None) -> Resposta:
         exe = _achar_claude()
         argv = [exe, "-p", texto, "--output-format", "json", *_args_comuns(self.cfg)]
         if self.session_id:
@@ -580,6 +586,8 @@ class OneshotBrain:
         r.ms_primeiro_texto = r.ms_total     # nao ha streaming aqui
         if data.get("is_error"):
             r.erro = data.get("subtype") or "erro"
+        if on_delta and r.texto:
+            on_delta(r.texto)
         if on_sentence and r.texto:
             on_sentence(r.texto)
         return r

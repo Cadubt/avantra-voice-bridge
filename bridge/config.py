@@ -55,6 +55,7 @@ DEFAULTS: dict = {
         "oneshot": "ctrl+alt+v", "cancel": "ctrl+alt+x",
     },
     "log": {"pasta": "logs", "verbose": True},
+    "painel": {"enabled": True, "largura": 1500, "altura": 940, "debug": False},
 }
 
 

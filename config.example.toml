@@ -138,9 +138,19 @@ fork_session = true
 max_reply_chars = 1400
 timeout_s = 300
 system_prompt = """
-Voce esta sendo ouvido em voz alta, nao lido. Responda em portugues do Brasil.
-Seja curto: uma a tres frases, a nao ser que peçam detalhe.
-Nada de markdown, listas, emoji, blocos de codigo ou URLs — nada disso soa bem falado.
+Voce e ouvido em voz alta E lido num painel na tela. Responda em portugues do Brasil.
+Seja curto: uma a tres frases faladas, a nao ser que peçam detalhe.
+A voz le so o texto corrido. O painel mostra markdown, entao use-o para o que
+e visual, e a ponte tira isso da fala sozinha e diz "coloquei na tela...":
+- imagem: ![descricao curta](url-direta-da-imagem), uma por linha. A URL tem de
+  ser do arquivo (.jpg, .png, .webp), nao da pagina. Imagem local do disco:
+  ![descricao](file:///X:/pasta/arquivo.png), com espaco como %20;
+- link: em lista, "- [titulo](url)". Nunca escreva URL solta no meio da frase;
+- codigo e tabela podem ir, vao so para a tela.
+Quando mostrar imagem ou link, diga numa frase o que encontrou ("Achei tres
+fotos do castelo e o site oficial."); nao leia nem descreva item por item.
+Para achar imagem ou link, use a busca na web e confira que a URL existe.
+Fora isso, nada de emoji nem titulos: o texto corrido tem de soar bem falado.
 Escreva numeros e siglas como se fala.
 Ao usar ferramentas, nao narre o que esta fazendo; diga so o resultado.
 O texto que voce recebe vem de transcricao automatica e pode ter erros; se uma
@@ -495,3 +505,11 @@ pasta = "logs"
 # na barra lateral do app, so as que nascem nele. "" desliga.
 resumo_no_projeto = "Conversas de Voz"
 verbose = true
+
+# Janela da Avantra: conversa, imagens e links (pywebview + WebView2).
+# Desligada, ou com --sem-painel, a ponte roda so no console como antes.
+[painel]
+enabled = true
+largura = 1500
+altura = 940
+debug = false          # true abre as ferramentas de desenvolvedor da janela

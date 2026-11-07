@@ -27,8 +27,9 @@ turno**. Leia a seção de latência antes de decidir se serve pra você.
 start.cmd
 ```
 
-Deixe a janela aberta. Ela mostra o que você falou, o que ele respondeu e
-quanto tempo cada etapa levou.
+Abre a **janela da Avantra** (veja "O painel", logo abaixo) e o console por
+trás dela. Fechar a janela encerra a ponte. Para só o console, como antes:
+`start.cmd --sem-painel`, ou `[painel] enabled = false`.
 
 A ponte sobe **calada**. Aperte `Pause` e a linha de estado muda pra
 `· escutando` — aí pode falar. (Se preferir que ela já nasça ouvindo, mude
@@ -59,6 +60,46 @@ Comandos que a ponte resolve sozinha, sem gastar um turno:
 | `abre o world of warcraft` | abre um programa da lista `[apps]` |
 | `retoma a conversa do tavern tale` | entra numa conversa antiga e continua dela |
 | `status` | diz onde está e em que modo |
+
+### O painel
+
+Uma janela no estilo HUD com três colunas:
+
+- **esquerda** — o reator, que muda de cor com o estado (azul apagado
+  dormindo, ciano escutando, âmbar pensando, claro falando, vermelho
+  confirmando) e pulsa com o nível do microfone; botões *Escutar* e *Parar*
+  (o mesmo que o `Pause`); a lista de ferramentas usadas; e o *Registro*, que
+  é o console da ponte.
+- **centro** — a conversa. A resposta aparece enquanto é escrita, com
+  markdown: títulos, listas, tabelas, código e imagens. Embaixo, uma caixa
+  para **digitar** em vez de falar (Enter envia).
+- **direita** — o *Conteúdo*: as imagens e links de cada resposta, em
+  galeria e em cartões. Clicar numa imagem amplia; clicar num link abre no
+  navegador padrão, nunca dentro da janela.
+
+Peça coisas visuais: *"me mostra fotos do castelo de Neuschwanstein"*,
+*"me passa os links da documentação do URP"*. O prompt pede ao modelo imagem
+como `![descrição](url)` e link como `- [título](url)`.
+
+**A voz fica simples quando há coisa para ver.** Com o painel aberto, imagem
+nunca é lida, lista de links sai da fala, link no meio da frase vira só o
+texto dele, e código e tabela vão só para a tela. No fim ela diz numa frase o
+que apareceu: *"Coloquei na tela duas imagens e três links."*
+(`FiltroDeFala` em `bridge/tts.py`.)
+
+**Confirmação do guarda** aparece como uma faixa vermelha com o que ela ouviu
+e o que vai fazer, e botões *Sim* e *Não*. Responder falando continua
+valendo. A **senha**, se houver, continua só por voz: um clique não prova
+que é você na frente do computador.
+
+Segurança, porque a página conversa com o Python: o HTML das respostas passa
+pelo `nh3` com uma lista fechada de tags (script, iframe e eventos inline não
+sobrevivem); link só abre se for `http`, `https` ou `mailto`; imagem só
+carrega de `http(s)` ou `data:image`, e imagem local do disco é convertida
+pelo Python, só se for extensão de imagem e até 8 MB.
+
+Custo: o WebView2 (motor do Edge, já vem no Windows 11) soma uns 300 a 400 MB
+de RAM. Não usa a GPU de forma relevante.
 
 ### Abrir programas
 
@@ -420,6 +461,13 @@ escrever no seu historico.
 
 ## Armadilhas que custaram caro aqui
 
+- **Ponte iniciada de dentro de um terminal do app Claude não autentica.** O
+  terminal do app exporta variáveis próprias (`ANTHROPIC_BASE_URL`,
+  `CLAUDE_CODE_*`) que o `claude` filho herda. Rode pelo `start.cmd`, pelo
+  Explorer ou por um terminal comum. E se o painel disser *"Failed to
+  authenticate"*, o `claude` da linha de comando está deslogado: rode
+  `claude auth login` num terminal e reabra.
+
 Coisas que falham **sem dar erro**, encontradas montando isto nesta máquina.
 Se algum dia o microfone "parar de funcionar", comece por aqui.
 
@@ -596,6 +644,8 @@ bridge/sessoes.py        lê as sessões do aplicativo Claude
 bridge/hotkeys.py        atalhos globais via RegisterHotKey
 bridge/metrics.py        cronometragem por turno
 bridge/config.py         lê o config.toml (ou o exemplo, num clone novo)
+bridge/painel.py         a janela (pywebview): eventos, markdown seguro, links
+painel/index.html        a página do painel: layout, reator, galeria
 tools/                   medição, calibração e testes (veja abaixo)
 ```
 

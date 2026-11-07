@@ -31,8 +31,8 @@ from bridge.guarda import Guarda  # noqa: E402
 from bridge.hotkeys import HotkeyManager  # noqa: E402
 from bridge.metrics import MetricsLog, Turn  # noqa: E402
 from bridge.stt import Transcriber, WakeWord  # noqa: E402
-from bridge.tts import (SpeechQueue, build_speaker, clean_for_speech,  # noqa: E402
-                        split_sentences)
+from bridge.tts import (FiltroDeFala, SpeechQueue, build_speaker,  # noqa: E402
+                        clean_for_speech, split_sentences)
 
 DORMINDO = "dormindo"
 ESCUTANDO = "escutando"
@@ -58,14 +58,25 @@ class _FalaPronta:
     processamento pula a transcricao quando ve este tipo.
     """
 
-    __slots__ = ("texto", "t_inicio", "t_fim", "t_fechou", "audio")
+    __slots__ = ("texto", "t_inicio", "t_fim", "t_fechou", "audio", "digitada")
 
-    def __init__(self, texto: str, origem) -> None:
+    def __init__(self, texto: str, origem, digitada: bool = False) -> None:
         self.texto = texto
+        self.digitada = digitada
         self.audio = getattr(origem, "audio", None)
         self.t_inicio = getattr(origem, "t_inicio", time.perf_counter())
         self.t_fim = getattr(origem, "t_fim", time.perf_counter())
         self.t_fechou = getattr(origem, "t_fechou", time.perf_counter())
+
+
+class _RespostaDigitada:
+    """Sim ou nao que veio de um botao do painel, nao do microfone."""
+
+    __slots__ = ("decisao",)
+    audio = None
+
+    def __init__(self, decisao: bool) -> None:
+        self.decisao = decisao
 
 
 def _sim_ou_nao(texto: str):
@@ -116,6 +127,7 @@ class Ponte:
         self.log_acoes = pasta_logs / ("acoes-%s.log" % hoje)
         self.turno_atual: Turn | None = None
         self._avisou_ferramenta = False
+        self.painel = None      # a janela, quando aberta (bridge/painel.py)
 
     # ------------------------------------------------------------------
     # montagem
@@ -455,6 +467,8 @@ class Ponte:
 
             print("\n  [guarda] ouvi: %s" % (ouvi or "(nada)"), flush=True)
             print("  [guarda] vou: %s" % descricao, flush=True)
+            self._tela("confirmacao", "Ação que pede confirmação", ouvi,
+                       descricao)
 
             estava_mudo = bool(self.listener and self.listener.muted)
             if estava_mudo:
@@ -485,18 +499,23 @@ class Ponte:
                         self._dizer("Não ouvi resposta. Não vou fazer nada.")
                         return False
 
-                    res = self.stt.transcribe(utt.audio, aplicar_filtros=False)
-                    texto = (res.texto or "").strip()
-                    print("  [guarda] voce respondeu: %s" % texto, flush=True)
-                    # Quando voce responde em cima da pergunta, o VAD junta
-                    # tudo numa fala so e a transcricao vira "Posso? Não!".
-                    # Tira o que foi eco antes de classificar, senao um "sim"
-                    # grudado no "Posso?" nao e reconhecido.
-                    limpo = self._sem_eco(texto)
-                    if limpo != texto:
-                        print("  [guarda] sem o eco: %s" % (limpo or "(nada)"),
-                              flush=True)
-                    decisao = _sim_ou_nao(limpo or texto)
+                    if isinstance(utt, _RespostaDigitada):
+                        decisao = utt.decisao
+                        print("  [guarda] respondeu no painel: %s"
+                              % ("sim" if decisao else "não"), flush=True)
+                    else:
+                        res = self.stt.transcribe(utt.audio, aplicar_filtros=False)
+                        texto = (res.texto or "").strip()
+                        print("  [guarda] voce respondeu: %s" % texto, flush=True)
+                        # Quando voce responde em cima da pergunta, o VAD junta
+                        # tudo numa fala so e a transcricao vira "Posso? Não!".
+                        # Tira o que foi eco antes de classificar, senao um
+                        # "sim" grudado no "Posso?" nao e reconhecido.
+                        limpo = self._sem_eco(texto)
+                        if limpo != texto:
+                            print("  [guarda] sem o eco: %s" % (limpo or "(nada)"),
+                                  flush=True)
+                        decisao = _sim_ou_nao(limpo or texto)
                     if decisao is True:
                         if not self._senha_ok(espera):
                             self._dizer("Senha errada ou não ouvi. Não vou fazer.")
@@ -510,6 +529,7 @@ class Ponte:
                 return False
             finally:
                 self.aguardando_confirmacao.clear()
+                self._tela("confirmacao_fim")
                 # Devolve o microfone ao estado anterior: se o turno estava
                 # com ele mudo, o resto da resposta nao pode ficar captando a
                 # caixa de som so porque houve uma confirmacao no meio.
@@ -532,11 +552,14 @@ class Ponte:
                 self.fila_confirmacao.get_nowait()
         except queue.Empty:
             pass
+        self._tela("confirmacao", "Diga a senha em voz alta", "", "")
         self.voz.new_turn()
         self.voz.say("Qual é a senha?")
         self.voz.wait_idle(60)
         bip(subindo=True)
-        utt = self._esperar_resposta(espera)
+        # A senha so vale falada: e ela que prova que e voce quem esta na
+        # frente do computador. Um clique no painel nao serve de senha.
+        utt = self._esperar_resposta(espera, so_voz=True)
         if utt is None:
             return False
         res = self.stt.transcribe(utt.audio, aplicar_filtros=False)
@@ -578,6 +601,7 @@ class Ponte:
                     except queue.Empty:
                         pass
                     self.aguardando_confirmacao.set()
+                    self._tela("confirmacao", pergunta, "", "")
                     self.voz.new_turn()
                     self.voz.say(pergunta if tentativa == 0
                                  else "Não entendi. " + pergunta)
@@ -587,6 +611,8 @@ class Ponte:
                     utt = self._esperar_resposta(espera)
                     if utt is None:
                         return False
+                    if isinstance(utt, _RespostaDigitada):
+                        return utt.decisao
                     res = self.stt.transcribe(utt.audio, aplicar_filtros=False)
                     texto = (res.texto or "").strip()
                     print("  [confirmação] você respondeu: %s" % texto, flush=True)
@@ -596,6 +622,7 @@ class Ponte:
                 return False
             finally:
                 self.aguardando_confirmacao.clear()
+                self._tela("confirmacao_fim")
                 if estava_mudo and self.listener and not self.listener.muted:
                     self.listener.mute()
 
@@ -614,7 +641,7 @@ class Ponte:
         sobrou = [p for p in normalizar(texto).split() if p not in dele]
         return " ".join(sobrou)
 
-    def _esperar_resposta(self, espera: float):
+    def _esperar_resposta(self, espera: float, so_voz: bool = False):
         """Pega a proxima fala que nao seja eco da propria pergunta.
 
         Nao desiste enquanto voce estiver falando. O VAD so entrega a fala
@@ -639,6 +666,10 @@ class Ponte:
                 utt = self.fila_confirmacao.get(timeout=0.25)
             except queue.Empty:
                 continue
+            if isinstance(utt, _RespostaDigitada):
+                if so_voz:
+                    continue
+                return utt
             if getattr(utt, "audio", None) is None:
                 continue
             # Falas capturadas enquanto a pergunta ainda tocava podem ser o
@@ -720,6 +751,7 @@ class Ponte:
             self.ultimo_uso = time.time()
             self.ultima_fala = texto
             print("\n[voce] %s" % texto, flush=True)
+            self._tela("voce", texto, utt.digitada)
             t.text_in = texto
             cmd = comandos.interpretar(texto, self.cfg["workspaces"],
                                        self.cfg["apps"], self.cfg["modelos"],
@@ -806,6 +838,7 @@ class Ponte:
         self.ultimo_uso = time.time()
         self.ultima_fala = texto     # o guarda repete isto na confirmacao
         print("\n[voce] %s" % texto, flush=True)
+        self._tela("voce", texto)
         t.text_in = texto
 
         # "Avantra, dormir" tem que funcionar igual a "dormir". Chamar pelo
@@ -846,11 +879,17 @@ class Ponte:
             self.listener.mute()
 
         primeira = {"marcada": False}
+        # Com o painel aberto, link e imagem vao para a tela e a voz so conta
+        # quantos foram. Sem painel, nao ha onde mostrar: segue como antes.
+        filtro = FiltroDeFala() if self.painel else None
+        self._tela("resposta_inicio")
 
         def falar(frase: str) -> None:
             if not primeira["marcada"]:
                 primeira["marcada"] = True
                 t.mark("tts_1a_pedida")
+            if filtro:
+                frase = filtro.filtrar(frase)
             limpa = clean_for_speech(frase)
             if limpa:
                 print("[avantra] %s" % limpa, flush=True)
@@ -865,10 +904,15 @@ class Ponte:
                 t.mark("tts_1a_pedida")
                 self.voz.say("Só um segundo, deixa eu olhar.")
             print("   [%s]" % nome, flush=True)
+            self._tela("ferramenta", nome)
+
+        def pedaco(acumulado: str) -> None:
+            if self.painel:
+                self.painel.resposta_delta(acumulado)
 
         t.mark("claude_inicio")
         r = self.brain.ask(texto, on_sentence=falar, cancel=self.cancelar,
-                           on_tool=usou_ferramenta)
+                           on_tool=usou_ferramenta, on_delta=pedaco)
         t.mark("claude_fim")
         if r.ms_primeiro_texto:
             t.t["claude_1o_texto"] = t.t["claude_inicio"] + r.ms_primeiro_texto / 1000
@@ -877,11 +921,21 @@ class Ponte:
             self._log("! claude: %s" % r.erro)
             self.voz.new_turn()
             self.voz.say("Olha, %s" % r.erro)
+        elif filtro and not r.cancelada:
+            aviso = filtro.resumo()
+            if aviso:
+                print("[avantra] %s" % aviso, flush=True)
+                self.voz.say(aviso)
         t.text_out = r.texto
 
         self.voz.wait_idle(600)
         t.mark("tts_fim")
         self.turno_atual = None
+        lat = t.span("fala_fim", "tts_1o_som")
+        self._tela("resposta_fim", r.texto,
+                   r.erro or ("(interrompida)" if r.cancelada and not r.texto
+                              else ""),
+                   lat if isinstance(lat, float) else None)
 
         self.metrics.write(t)
         if self.cfg["log"].get("verbose"):
@@ -1210,6 +1264,7 @@ class Ponte:
 
     def _dizer(self, texto: str, avisar_fim: bool = True) -> None:
         print("[avantra] %s" % texto, flush=True)
+        self._tela("fala_local", texto)
         self.voz.new_turn()
         self.voz.say(texto)
         self.voz.wait_idle(60)
@@ -1250,6 +1305,69 @@ class Ponte:
         # Apaga o medidor antes de escrever, senao a mensagem cola nele.
         print("\x1b[2K\r" + msg, flush=True)
         self._status_anterior = None    # forca redesenhar o medidor depois
+        # Avisos de estado ("· parei", "! erro") viram uma linha discreta na
+        # conversa. O resto (descartes, eco ignorado) fica so no Registro.
+        curto = msg.strip()
+        if self.painel and curto[:1] in ("·", "!"):
+            self.painel.sistema(curto.lstrip("·! ").strip(),
+                                "erro" if curto.startswith("!") else "info")
+
+    # ------------------------------------------------------------------
+    # painel (janela)
+    # ------------------------------------------------------------------
+
+    def _tela(self, metodo: str, *args) -> None:
+        """Repassa um evento ao painel, se houver. Nunca derruba a ponte."""
+        if self.painel is None:
+            return
+        try:
+            getattr(self.painel, metodo)(*args)
+        except Exception as exc:
+            print("[painel] %s falhou: %s" % (metodo, exc), flush=True)
+
+    def estado_visivel(self) -> str:
+        if not hasattr(self, "brain"):
+            return "iniciando"
+        if self.aguardando_confirmacao.is_set():
+            return "confirmando"
+        voz = getattr(self, "voz", None)
+        if voz is not None and voz.busy():
+            return "falando"
+        if self.estado == OCUPADO:
+            return "pensando"
+        return self.estado
+
+    def info_visivel(self) -> dict:
+        b = self.cfg["brain"]
+        cwd = str(getattr(getattr(self, "brain", None), "cwd", "") or b.get("cwd") or "")
+        voz = getattr(getattr(self, "speaker", None), "name", "") or ""
+        return {"modelo": b.get("model") or "", "esforco": b.get("effort") or "",
+                "pasta": Path(cwd).name if cwd else "", "pasta_completa": cwd,
+                "voz": voz}
+
+    def receber_texto(self, texto: str) -> None:
+        """Texto digitado no painel. Durante uma confirmacao, vale como resposta."""
+        if self.aguardando_confirmacao.is_set():
+            decisao = _sim_ou_nao(texto)
+            if decisao is None:
+                self._tela("sistema", "Responda sim ou não (ou use os botões).")
+                return
+            self.fila_confirmacao.put(_RespostaDigitada(decisao))
+            return
+        self.fila.put(_FalaPronta(texto, None, digitada=True))
+
+    def resposta_digitada(self, decisao: bool) -> None:
+        if self.aguardando_confirmacao.is_set():
+            self.voz.stop_all()        # cala a pergunta: voce ja respondeu
+            self.fila_confirmacao.put(_RespostaDigitada(decisao))
+
+    def parar_pelo_painel(self) -> None:
+        """Botao Parar: o mesmo que o Pause quando ela esta falando ou pensando."""
+        if self.aguardando_confirmacao.is_set():
+            self.voz.stop_all()
+            return
+        if self.voz.busy() or self.estado == OCUPADO:
+            self._toggle()
 
     def _gravar_transcript(self, entrada: str, saida: str) -> None:
         try:
@@ -1324,12 +1442,67 @@ def loop_texto(p: Ponte) -> None:
         p._perguntar(linha, t)
 
 
+def rodar_com_painel(p: Ponte, cfg: Config) -> None:
+    """A janela fica na thread principal (o WebView exige); a ponte, numa thread.
+
+    Fechar a janela encerra tudo. Se a janela nao abrir (WebView2 ausente,
+    pywebview nao instalado), cai para o modo console em vez de morrer.
+    """
+    try:
+        from bridge.painel import Painel
+    except ImportError as exc:
+        print("[painel] indisponivel (%s); seguindo so no console. "
+              "Rode setup.cmd para instalar." % exc, flush=True)
+        cfg["painel"]["enabled"] = False
+        try:
+            p.montar()
+            p.rodar()
+        except KeyboardInterrupt:
+            pass
+        finally:
+            p.fechar()
+        return
+
+    painel = Painel(cfg)
+    p.painel = painel
+    painel.ponte = p
+
+    def trabalho() -> None:
+        try:
+            p.montar()
+            painel.sistema("pronta — diga \"%s\", aperte %s ou digite abaixo"
+                           % (p.wake.gatilho if p.wake else "Avantra",
+                              cfg["hotkeys"].get("toggle", "Pause")))
+            p.rodar()
+        except Exception as exc:
+            import traceback
+            traceback.print_exc()
+            painel.sistema("falha ao subir a ponte: %s" % exc, "erro")
+            if "authenticat" in str(exc).lower() or "login" in str(exc).lower():
+                painel.sistema("o claude da linha de comando está deslogado: "
+                               "abra um terminal, rode  claude auth login  e "
+                               "reabra a Avantra", "erro")
+
+    try:
+        painel.abrir(trabalho)
+    finally:
+        print("\nencerrando ...", flush=True)
+        p.fechar()
+        sys.stdout.flush()
+        # Threads de audio, atalho e do proprio WebView podem segurar o
+        # processo vivo depois da janela fechada. A ponte ja foi fechada
+        # direito acima; daqui em diante e so sair.
+        os._exit(0)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--list-devices", action="store_true")
     ap.add_argument("--texto", action="store_true",
                     help="digita em vez de falar (testa tudo menos o microfone)")
     ap.add_argument("--config", default=None)
+    ap.add_argument("--sem-painel", action="store_true",
+                    help="so o console, sem a janela")
     args = ap.parse_args()
 
     if args.list_devices:
@@ -1338,6 +1511,12 @@ def main() -> None:
 
     cfg = Config.load(args.config)
     p = Ponte(cfg, modo_texto=args.texto)
+
+    if (cfg["painel"].get("enabled", True) and not args.texto
+            and not args.sem_painel):
+        rodar_com_painel(p, cfg)
+        return
+
     try:
         p.montar()
         if args.texto:

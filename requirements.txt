@@ -10,3 +10,8 @@ pillow
 # estoura na primeira fala com "cublas64_12.dll is not found".
 nvidia-cublas-cu12
 nvidia-cudnn-cu12
+
+# painel (janela)
+pywebview>=5
+markdown>=3.5
+nh3>=0.2

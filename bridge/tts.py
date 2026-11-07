@@ -59,6 +59,110 @@ def clean_for_speech(text: str) -> str:
 
 
 # --------------------------------------------------------------------------
+# Fala simplificada quando a resposta tambem aparece no painel
+# --------------------------------------------------------------------------
+
+_MD_IMG = re.compile(r"!\[([^\]]*)\]\(\s*<?([^)\s>]+)>?(?:\s+\"[^\"]*\")?\s*\)")
+_MD_LINK = re.compile(r"(?<!!)\[([^\]]+)\]\(\s*<?([^)\s>]+)>?(?:\s+\"[^\"]*\")?\s*\)")
+_URL_NUA = re.compile(r"<?https?://[^\s<>]+>?")
+_MARCA_DE_LISTA = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+")
+_EXT_IMAGEM = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg", ".avif")
+
+_POR_EXTENSO = {1: ("um", "uma"), 2: ("dois", "duas"), 3: ("três", "três"),
+                4: ("quatro", "quatro"), 5: ("cinco", "cinco"),
+                6: ("seis", "seis"), 7: ("sete", "sete"), 8: ("oito", "oito"),
+                9: ("nove", "nove"), 10: ("dez", "dez")}
+
+
+def _quantos(n: int, singular: str, plural: str, feminino: bool) -> str:
+    palavra = _POR_EXTENSO.get(n, (str(n), str(n)))[1 if feminino else 0]
+    return "%s %s" % (palavra, singular if n == 1 else plural)
+
+
+class FiltroDeFala:
+    """Tira da voz o que so faz sentido olhando: links, imagens, codigo, tabela.
+
+    Com o painel aberto, ler uma URL em voz alta e pior que inutil: e longo,
+    ninguem entende e atrasa o que importa. Aqui a regra e simples:
+      - imagem nunca e falada; e contada;
+      - item de lista que e um link sai inteiro (e uma lista de links);
+      - link no meio de uma frase vira so o texto dele;
+      - URL solta, bloco de codigo e tabela saem e sao contados.
+    No fim, resumo() diz numa frase o que foi parar na tela.
+
+    Guarda estado entre chamadas: a resposta chega frase a frase, e um bloco
+    de codigo costuma atravessar varias delas.
+    """
+
+    def __init__(self) -> None:
+        self.em_codigo = False
+        self.na_tabela = False
+        self.imagens: set[str] = set()
+        self.links: set[str] = set()
+        self.codigos = 0
+        self.tabelas = 0
+
+    def filtrar(self, frase: str) -> str:
+        saida = []
+        for linha in frase.split("\n"):
+            s = linha.strip()
+            if s.startswith("```") or s.startswith("~~~"):
+                if not self.em_codigo:
+                    self.codigos += 1
+                self.em_codigo = not self.em_codigo
+                continue
+            if self.em_codigo:
+                continue
+            if s.startswith("|"):
+                if not self.na_tabela:
+                    self.tabelas += 1
+                self.na_tabela = True
+                continue
+            if s:
+                self.na_tabela = False
+
+            for m in _MD_IMG.finditer(s):
+                self.imagens.add(m.group(2))
+            s = _MD_IMG.sub("", s)
+
+            links = _MD_LINK.findall(s)
+            for _texto, url in links:
+                if url.lower().split("?")[0].endswith(_EXT_IMAGEM):
+                    self.imagens.add(url)
+                else:
+                    self.links.add(url)
+            if links and _MARCA_DE_LISTA.match(s):
+                continue                      # lista de links: vai so pra tela
+            s = _MD_LINK.sub(r"\1", s)
+
+            for url in _URL_NUA.findall(s):
+                self.links.add(url.strip("<>"))
+            s = _URL_NUA.sub("", s)
+            s = re.sub(r"\(\s*\)|\[\s*\]", "", s)
+            if s.strip(" -–—:;,.*_"):
+                saida.append(s)
+        return "\n".join(saida)
+
+    def resumo(self) -> str:
+        itens = []
+        if self.imagens:
+            itens.append(_quantos(len(self.imagens), "imagem", "imagens", True))
+        if self.links:
+            itens.append(_quantos(len(self.links), "link", "links", False))
+        if self.codigos:
+            itens.append("o código" if self.codigos == 1
+                         else _quantos(self.codigos, "bloco de código",
+                                       "blocos de código", False))
+        if self.tabelas:
+            itens.append(_quantos(self.tabelas, "tabela", "tabelas", True))
+        if not itens:
+            return ""
+        lista = (itens[0] if len(itens) == 1
+                 else ", ".join(itens[:-1]) + " e " + itens[-1])
+        return "Coloquei na tela %s." % lista
+
+
+# --------------------------------------------------------------------------
 # Backends. Cada um sabe sintetizar (devolve algo opaco) e tocar esse algo.
 # A separacao e o que permite sintetizar a proxima frase enquanto esta toca.
 # --------------------------------------------------------------------------
